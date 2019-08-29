@@ -1,20 +1,18 @@
 """
 Hash Functions
 """
-
+from numbers import Number
 
 __all__ = [
-    "hash2vector"
+    "hash2vector", "hash2int"
 ]
 
 INT32_MAX = 2 ** 32 - 1
-a, c = 1103515245, 12345
+a, b = 1103515245, 12345
 
 
-def lcg(seed, min_value, max_value, n):
-    for _ in n:
-        seed = (a * seed + c) & INT32_MAX
-        yield int((max_value - min_value) * (seed / INT32_MAX)) + min_value
+def lcg_hash(seed, min_value, max_value):
+    return int((max_value - min_value) * (seed / INT32_MAX)) + min_value
 
 
 def hash2vector(obj, length, min_value=0, max_value=INT32_MAX, seed=0):
@@ -32,15 +30,30 @@ def hash2vector(obj, length, min_value=0, max_value=INT32_MAX, seed=0):
         The random seed to determine the hashing results.
     :return: Tuple<int>
     """
-    if isinstance(obj, int):
-        seed = (seed + obj * 31) & INT32_MAX
+    if isinstance(obj, Number):
+        seed = (seed + int(obj) * 31) & INT32_MAX
     elif isinstance(obj, str):
-        for c in obj:
-            seed = (seed * 31 + ord(c)) & INT32_MAX
+        for character in obj:
+            seed = (seed * 31 + ord(character)) & INT32_MAX
     else:
-        raise ValueError("The object to be hashed doesn't match the required types.")
+        raise ValueError("The hashed object type {0} doesn't match the required types.".format(type(obj)))
 
-    return lcg(seed, min_value, max_value, length)
+    for _ in range(length):
+        seed = (a * seed + b) & INT32_MAX
+        yield lcg_hash(seed, min_value, max_value)
+
+
+def hash2int(obj, min_value=0, max_value=INT32_MAX, seed=0):
+    if isinstance(obj, Number):
+        seed = (seed + int(obj) * 31) & INT32_MAX
+    elif isinstance(obj, str):
+        for character in obj:
+            seed = (seed * 31 + ord(character)) & INT32_MAX
+    else:
+        raise ValueError("The hashed object type {0} doesn't match the required types.".format(type(obj)))
+    seed = (a * seed + b) & INT32_MAX
+    return lcg_hash(seed, min_value, max_value)
+
 
 
 

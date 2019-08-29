@@ -3,7 +3,7 @@ LSH for euclidean distance.
 
 """
 from pyspark import SparkContext
-from datming.similar_items import euclidean_distance
+from datming.similarity import euclidean_distance
 import numpy as np
 
 

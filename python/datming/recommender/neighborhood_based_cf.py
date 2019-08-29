@@ -13,9 +13,12 @@ Two Neighborhood-Based CF modes: spark, local
         Faster but also more strict in data size limitation.
 """
 from pyspark import SparkContext, RDD
-from datming.similar_items import JaccardSimilarity
+from datming.similarity import JaccardSimilarity
+from datming.utils import hash2int
 
 from numbers import Number
+from types import GeneratorType
+from typing import Hashable, Iterator
 from collections import defaultdict
 import heapq
 
@@ -25,10 +28,16 @@ __all__ = [
 
 
 class NeighborhoodBasedCF(object):
-    def __init__(self, k=float("inf"), lsh_params=None,
-                 n_bucket_block=1, n_cross_block=1, n_item_block=1,
-                 bucket_block_size=None, cross_block_size=None, item_block_size=None, **params):
+    """
+    Base class of Item-based/User-based Collaborative Filtering.
+    """
+    def __init__(self, k: Number=float("inf"), maximum_num_partitions=None,
+                 n_bucket_block: int=1, n_cross_block: int=1, n_item_block: int=1,
+                 bucket_block_size: int=None, cross_block_size: int=None, item_block_size: int=None,
+                 seed: int=None, **params):
         self._k = k if isinstance(k, int) else float("inf")
+        self._maximum_num_partitions = maximum_num_partitions \
+            if isinstance(maximum_num_partitions, int) and maximum_num_partitions > 0 else float("inf")
 
         self._n_bucket_block = n_bucket_block
         self._n_item_block = n_item_block
@@ -39,50 +48,67 @@ class NeighborhoodBasedCF(object):
         self._n_buckets = 0
         self._n_items = 0
 
-        self._lsh_params = lsh_params if lsh_params is not None else dict()
+        self._seed = seed if isinstance(seed, int) else np.random.randint(0, 2**32-1)
+        self._lsh_params = params
+        self._lsh_params["seed"] = seed
         self._num_partitions_of_train = self._num_partitions_of_test = 0
         self._data = DataContainer()
 
-    def fit(self, train):
+    def fit(self, train: RDD):
         """
-        :param train: RDD<bucket, item, rating>
-        :return:
+        :param train: RDD<(Hashable, Hashable, float)>
+            = RDD<(bucket, item, rating)>
+        :return: self
         """
-        train, self._num_partitions_of_train = self._check_data(train=train)
-        self._init_parameters(train)
-        similarity = self._calculate_similarity(train, self._lsh_params).cache()
-        train = self._blocking_matrix(rating=train)
-        similarity = self._blocking_matrix(similarity=similarity)
-        print(sorted(similarity.collect()))
+        # check the data type and initialize parameters
+        train = self._check_data(train=train)
+        self.__init_parameters(train)
+
+        similarity = self.__calculate_similarity(train,
+                                                 self._lsh_params, self._maximum_num_partitions).cache()
+        # similarity = RDD<(Hashable, Hashable, float)>
+
+        train = self.__blocking_matrix(train=train)
+        # train = RDD<((int, int), (Hashable, Hashable, float))>
+
+        similarity = self.__blocking_matrix(similarity=similarity)
+        # similarity = RDD<((int, int), (Hashable, Hashable, float))>
+
         self._data.add(train=train, similarity=similarity)
         return self
 
-    def predict(self, test):
-        test, self._num_partitions_of_test = self._check_data(test=test)
-        test = self._blocking_matrix(rating=test)
-        train, test, similarity = self._group_by_blocks(
+    def predict(self, test: RDD) -> RDD:
+        """
+        :param test: RDD<(Hashable, Hashable)>
+            = RDD<(bucket, item)>
+        :return: RDD<(Hashable, Hashable, float)>
+            = RDD<(bucket, item, predicted_rating)>
+        """
+        test = self._check_data(test=test)
+        test = self.__blocking_matrix(test=test)
+        # test = RDD<((int, int), (Hashable, Hashable))>
+
+        train, test, similarity = self.__group_by_blocks(
             self._data.train, test, self._data.similarity,
             self._n_bucket_block, self._n_cross_block, self._n_item_block
         )
+        # train, test, similarity = RDD<(bucket_block, cross_block, item_block), (value_i, i)>, i=0, 1, 2
+        # train, value_0 = (bucket, item, rating)
+        # test, value_1 = (bucket, item)
+        # similarity, value_2 = (bucket, item, similarity)
 
-        prediction = self._make_prediction(
-            train=train, test=test, similarity=similarity, k=self._k
+        prediction = self.__make_prediction(
+            train=train, test=test, similarity=similarity, k=self._k,
+            maximum_num_partitions=self._maximum_num_partitions
         )
-
+        prediction.count()
         return prediction
 
     def fit_predict(self, train, test):
         return self.fit(train).predict(test)
 
     @staticmethod
-    def _hash(hashable):
-        if isinstance(hashable, Number):
-            return int(hashable)
-        else:
-            return hash(hashable)
-
-    @staticmethod
-    def _check_data(train=None, test=None):
+    def _check_data(train: RDD=None, test: RDD=None) -> (RDD, int):
         # Data-type check
         if isinstance(train, RDD):
             is_legal_train = train.map(
@@ -91,7 +117,7 @@ class NeighborhoodBasedCF(object):
             if not is_legal_train:
                 raise ValueError("Parameter train should be an RDD<(user, item, rating)>")
             num_partitions_of_train = train.getNumPartitions()
-            return train, num_partitions_of_train
+            return train
 
         if isinstance(test, RDD):
             is_legal_test = test.map(
@@ -100,29 +126,27 @@ class NeighborhoodBasedCF(object):
             if not is_legal_test:
                 raise ValueError("Parameter train should be an RDD<(user, item, rating)>")
             num_partitions_of_test = test.getNumPartitions()
-            return test, num_partitions_of_test
+            return test
 
         raise ValueError("RDD train/test need to be input.")
 
     @staticmethod
-    def _calculate_similarity(train, lsh_params):
+    def __calculate_similarity(train: RDD, lsh_params: dict, maximum_num_partitions: int) -> RDD:
         """
         Calculate Jaccard Similarity from train-RDD.
-        :param train:
-        :return: RDD<int, int, float>
-            RDD<bucket, bucket, similarity>
+        :param train: RDD<(Hashable, Hashable, float)>
+        :return: RDD<Hashable, Hashable, float>
+            = RDD<bucket, bucket, similarity>
         """
         train = train.map(lambda u: (u[0], u[1]))\
             .groupByKey().map(lambda u: (u[0], list(u[1]))).cache()
-        similarity_among_buckets = JaccardSimilarity(**lsh_params)._lsh_predict(train)
+        similarity_among_buckets = JaccardSimilarity(**lsh_params).predict(train).cache()
+        if similarity_among_buckets.getNumPartitions() > maximum_num_partitions:
+            similarity_among_buckets = similarity_among_buckets.coalesce(maximum_num_partitions).cache()
         return similarity_among_buckets
 
-    def _init_parameters(self, train):
+    def __init_parameters(self, train: RDD):
         """
-        :param train:
-            RDD<bucket, item, rating>
-        :return: model
-
         _n_buckets/_n_items:
             The number of distinct buckets/items in the train RDD.
         _bucket_block_size/_cross_block_size/_item_block_size:
@@ -134,17 +158,20 @@ class NeighborhoodBasedCF(object):
         if self._n_buckets <= self._k:
             self._k = float("inf")
 
+        # For the bucket dimension.
         if self._bucket_block_size is None:
             # Interpret bucket_block_size from n_bucket_block
             self._bucket_block_size = self._n_buckets // self._n_bucket_block + 1
         else:
             self._n_bucket_block = self._n_buckets // self._bucket_block_size + 1
 
+        # For the cross dimension.
         if self._cross_block_size is None:
             self._cross_block_size = self._n_buckets // self._n_cross_block + 1
         else:
             self._n_cross_block = self._n_buckets // self._cross_block_size + 1
 
+        # For the item dimension
         self._n_items = train.map(lambda u: u[1]).distinct().count()
         if self._item_block_size is None:
             self._item_block_size = self._n_items // self._n_item_block + 1
@@ -152,39 +179,54 @@ class NeighborhoodBasedCF(object):
             self._n_item_block = self._n_item // self._item_block_size + 1
         return self
 
-    def _blocking_matrix(self, rating=None, similarity=None):
+    def __blocking_matrix(self, train: RDD=None, test: RDD=None, similarity=None) -> RDD:
         """
-        :param train:
-            RDD<bucket, item, rating>
-        :param similarity:
+        Divide matrix into blocks for the purpose of reduce key number.
+        :param train: RDD<(Hashable, Hashable, float)>
+            = RDD<bucket, item, rating>
+        :param test: RDD<(Hashable, Hashable)>
+            = RDD<bucket, item>
+        :param similarity: RDD<(Hashable, Hashable, float)>
             RDD<bucket, bucket, similarity>
-        :return:
-            RDD<(bucket_block, item_block), (bucket, item, rating)> or
-            RDD<(bucket_block, bucket_block), (bucket, bucket, similarity)>
+        :return: RDD<(int, int)(Hashable, Hashable, float)>
+            = RDD<(bucket_block, item_block), (bucket, item, rating)> or
+              RDD<(bucket_block, bucket_block), (bucket, bucket, similarity)>
         """
-        _hash = self._hash
-        n_buckets, bucket_block_size = self._n_buckets, self._bucket_block_size
-        n_items, item_block_size = self._n_items, self._item_block_size
-        cross_block_size = self._cross_block_size
-        if rating is not None:
-            rating = rating.map(
-                lambda u: ((_hash(u[0]) % n_buckets // cross_block_size, _hash(u[1]) % n_items // item_block_size), u)
+        seed = self._seed
+        n_bucket_block = self._n_bucket_block
+        n_item_block = self._n_item_block
+        n_cross_block = self._n_cross_block
+
+        if train is not None:
+            train = train.map(
+                lambda u: (
+                    (hash2int(u[0], max_value=n_cross_block, seed=seed),
+                     hash2int(u[1], max_value=n_item_block, seed=seed)), u)
             ).cache()
-            rating.count()
-            return rating
+            train.count()
+            return train
+
+        if test is not None:
+            test = test.map(
+                lambda u: (
+                    (hash2int(u[0], max_value=n_bucket_block, seed=seed),
+                     hash2int(u[1], max_value=n_item_block, seed=seed)), u)
+            ).cache()
+            test.count()
+            return test
 
         if similarity is not None:
             similarity = similarity.flatMap(lambda u: [(u[0], u[1], u[2]), (u[1], u[0], u[2])]).map(
                 lambda u: (
-                    (_hash(u[0]) % n_buckets // bucket_block_size, _hash(u[1]) % n_buckets // cross_block_size), u
-                )
+                    (hash2int(u[0], max_value=n_bucket_block, seed=seed),
+                     hash2int(u[1], max_value=n_cross_block, seed=seed)), u)
             ).cache()
             similarity.count()
             return similarity
 
     @staticmethod
-    def _group_by_blocks(train, test, similarity,
-                         n_bucket_block, n_cross_block, n_item_block):
+    def __group_by_blocks(train: RDD, test: RDD, similarity: RDD,
+                          n_bucket_block: int, n_cross_block: int, n_item_block: int) -> (RDD, RDD, RDD):
         """
         :param train:
             RDD<(cross_block, item_block), (cross_bucket, item, rating)>
@@ -192,8 +234,6 @@ class NeighborhoodBasedCF(object):
             RDD<(bucket_block, item_block), (bucket, item)>
         :param similarity:
             RDD<(bucket_block, cross_block), (bucket, cross_bucket, similarity)>
-        :param n_bucket_block:
-        :return:
         """
         """
         train -> RDD<(b, bucket_block, item_block), ((bucket, item, rating), 0)>, b=1, ..., n_bucket_block
@@ -205,23 +245,23 @@ class NeighborhoodBasedCF(object):
                 ((b, u[0][0], u[0][1]), (u[1], 0))
                 for b in range(n_bucket_block)
             )
-        ).cache()
+        )
         test = test.flatMap(
             lambda u: (
                 ((u[0][0], c, u[0][1]), (u[1], 1))
                 for c in range(n_cross_block)
             )
-        ).cache()
+        )
         similarity = similarity.flatMap(
             lambda u:  (
                 ((u[0][0], u[0][1], i), (u[1], 2))
                 for i in range(n_item_block)
             )
-        ).cache()
+        )
         return train, test, similarity
 
     @classmethod
-    def _make_prediction(cls, train, test, similarity, k):
+    def __make_prediction(cls, train, test, similarity, k, maximum_num_partitions) -> RDD:
         """
         :param train:
             RDD<(b, cross_block, item_block), ((cross_bucket, item, rating), 0)>, b=1, ..., n_bucket_block
@@ -229,68 +269,115 @@ class NeighborhoodBasedCF(object):
             RDD<(bucket_block, b, item_block), ((bucket, item), 1)>, b=1, ..., n_bucket_block
         :param similarity:
             RDD<(bucket_block, cross_block, i), ((bucket, cross_bucket, similarity), 2)>, i=1, ..., n_item_block
-        :return:
+        :return: RDD<(Hashable, Hashable, float)>
+            RDD<(bucket, item, predicted_rating)>
         """
-
-        prediction = train.union(test).union(similarity)\
-            .groupByKey().flatMap(lambda u: cls._calculate_per_block(u, k)).cache()
-
-        if k == float("inf"):
-            prediction = prediction.reduceByKey(
-                lambda u1, u2: (u1[0] + u2[0], u1[1] + u2[1])
-            ).map(
-                lambda u: (u[0][0], u[0][1], u[1][1] / u[1][0])
-            )
-        else:
-            # k is a finite number
-            prediction = prediction.groupByKey().flatMap(lambda u: cls._sum_up_blocks(u, k)).cache()
-
+        prediction = train.union(test).union(similarity).coalesce(maximum_num_partitions)
+        prediction = (
+            prediction.groupByKey()
+                      .flatMap(lambda u: cls.__calculate_per_block(u, k))
+                      .coalesce(maximum_num_partitions)
+                      .groupByKey()
+                      .flatMap(lambda u: cls.__sum_up_blocks(u, k))
+                      .coalesce(maximum_num_partitions).cache()
+        )
         return prediction
 
     @staticmethod
-    def _calculate_per_block(key_values, k):
-        key, values = key_values
+    def __calculate_per_block(key_values: (tuple, Iterator), k: int) -> GeneratorType:
+        """
+        Find k nearest neighbors in each block for each to-be-predicted bucket-item pair.
+        """
+        (bucket_block, cross_block, item_block), values = key_values
+        # values = list(values)
+        """
+        Read matrix elements from iterator. 
+        The elements have three sources: train-RDD, test-RDD, similarity-RDD.
+        """
         ratings = dict()
         similarities = defaultdict(list)
         to_be_predicted = list()
         for value in values:
             if value[1] == 0:
                 # train
-                bucket, item, rating = value[0]
-                ratings[(bucket, item)] = rating
+                cross, item, rating = value[0]
+                ratings[(cross, item)] = rating
             elif value[1] == 1:
                 # test
-                to_be_predicted.append(value[0])
+                bucket, item = value[0]
+                to_be_predicted.append((bucket, item))
             elif value[1] == 2:
                 # similarity
-                bucket1, bucket2, sim = value[0]
-                similarities[bucket1].append((bucket2, sim))
+                bucket, cross, sim = value[0]
+                similarities[bucket].append((cross, sim))
 
+        """
+        Find k nearest neighbors for each bucket-item pair in test.
+        """
         for bucket, item in to_be_predicted:
-
-            heap = []
-            for bucket2, sim in similarities[bucket]:
-                if (bucket2, item) in ratings:
-                    if k == float("inf"):
-                        yield ((bucket, item), (sim, sim * ratings[(bucket2, item)]))
-                    else:
-                        heap.append(((key[0], key[2]), ((bucket, item), (sim, sim * ratings[(bucket2, item)]))))
             if k != float("inf"):
-                yield ((key[0], key[2]), ((bucket, item), (10**-10, -10**-10)))
-                yield from heapq.nlargest(k, heap, key=lambda u: u[1][1][0])
+                heap = []
             else:
-                yield ((bucket, item), (10 ** -10, -10 ** -10))
+                summary = [0, 0]
+
+            for cross, sim in similarities[bucket]:
+                # Similar bucket
+                if (cross, item) in ratings:
+                    # If this similar bucket has the rated the item
+                    if k != float("inf"):
+                        heap.append(
+                            ((bucket_block, item_block),
+                             ((bucket, item), (sim, sim * ratings[(cross, item)])))
+                        )
+                    else:
+                        summary[0] += sim
+                        summary[1] += sim * ratings[(cross, item)]
+            if k != float("inf"):
+                if len(heap) == 0:
+                    # prevent none value
+                    yield ((bucket_block, item_block), ((bucket, item), (0, 0)))
+                else:
+                    yield from heapq.nlargest(k, heap, key=lambda u: (u[1][1][0]))
+            else:
+                yield ((bucket_block, item_block), ((bucket, item), tuple(summary)))
 
     @staticmethod
-    def _sum_up_blocks(key_values, k):
+    def __sum_up_blocks(key_values: ((Hashable, Hashable), (float, float)), k: int) -> GeneratorType:
+        """
+        Sum up predicted ratings from all blocks.
+        :param key_values:
+            = RDD<(bucket, item), (similarity, rating)>
+        :param k:
+        :return: Generator<(bucket, item, predicted_rating)>
+        """
         key, values = key_values
         ratings = defaultdict(list)
         for (bucket, item), (sim, rating) in values:
             ratings[(bucket, item)].append((sim, rating))
         for bucket, item in ratings:
-            n_largest = heapq.nlargest(k, ratings[(bucket, item)], lambda u: u[0])
-            predicted_rating = sum(r for _, r in n_largest) / sum(sim for sim, _ in n_largest)
+            if k == float("inf"):
+                n_largest = ratings[(bucket, item)]
+            else:
+                n_largest = heapq.nlargest(k, ratings[(bucket, item)])
+
+            sum_sim = sum(sim for sim, _ in n_largest)
+            if sum_sim != 0:
+                predicted_rating = sum(r for _, r in n_largest) / sum_sim
+            else:
+                predicted_rating = None
             yield (bucket, item, predicted_rating)
+
+    @staticmethod
+    def evaluate(truth: RDD, prediction: RDD) -> float:
+        """
+        Calculate RMSE between truth and predictions.
+        :param truth: RDD<Hashable, Hashable, float> = RDD<(bucket, item, rating)>
+        :param prediction: RDD<Hashable, Hashable, float> = RDD<(bucket, item, rating)>
+        :return: float = RMSE
+        """
+        truth = truth.map(lambda u: ((u[0], u[1]), u[2]))
+        prediction = prediction.map(lambda u: ((u[0], u[1]), u[2]))
+        return truth.join(prediction).map(lambda u: (u[1][0] - u[1][1]) ** 2).mean() ** 0.5
 
 
 class DataContainer(object):
@@ -303,11 +390,13 @@ class DataContainer(object):
 
 
 class ItemBasedCF(NeighborhoodBasedCF):
-    def __init__(self, k=float("inf"), mode="spark-light", lsh_params=None,
-                 n_user_block=1, n_item_block=1, user_block_size=None, item_block_size=None):
-        super().__init__(k=k, mode=mode, lsh_params=lsh_params,
-                         n_bucket_block=n_item_block, n_item_block=n_user_block,
-                         bucket_block_size=item_block_size, item_block_size=user_block_size)
+    """
+    Item-based CF sub-classing from NeighborhoodBasedCF
+    """
+    def __init__(self, n_user_block=1, n_item_block=1,
+                 user_block_size=None, item_block_size=None, **kwargs):
+        super().__init__(n_bucket_block=n_item_block, n_item_block=n_user_block,
+                         bucket_block_size=item_block_size, item_block_size=user_block_size, **kwargs)
 
     @staticmethod
     def _check_data(train=None, test=None):
@@ -318,7 +407,7 @@ class ItemBasedCF(NeighborhoodBasedCF):
             RDD<(user, item)>
         :return:
         """
-        super()._check_data(train=train, test=test)
+        NeighborhoodBasedCF._check_data(train=train, test=test)
         if train is not None:
             return train.map(lambda u: (u[1], u[0], u[2]))
 
@@ -327,31 +416,10 @@ class ItemBasedCF(NeighborhoodBasedCF):
 
 
 class UserBasedCF(NeighborhoodBasedCF):
-    def __init__(self, k=float("inf"), mode="spark-light", lsh_params=None,
-                 n_user_block=1, n_item_block=1, n_cross_block=1,
-                 cross_block_size=None, user_block_size=None, item_block_size=None, **params):
-        super().__init__(k=k, mode=mode, lsh_params=lsh_params,
-                         n_bucket_block=n_user_block, n_item_block=n_item_block, n_cross_block=n_cross_block,
-                         bucket_block_size=user_block_size, item_block_size=item_block_size,
-                         cross_block_size=cross_block_size, **params)
-
-
-if __name__ == '__main__':
-    import numpy as np
-
-    train = SparkContext.getOrCreate().parallelize(np.random.randint(0, 100, (5000, 3))).cache()
-    test = SparkContext.getOrCreate().parallelize(np.random.randint(0, 100, (1000, 2))).cache()
-
-    np.random.seed(0)
-    print(
-        sorted(UserBasedCF(k=2, n_user_block=4, n_cross_block=4, n_item_block=4,
-                           threshold=0.01, n_bands=100, signature_length=200, random_seed=0)
-               .fit_predict(train, test).collect(), key=lambda u: u[2], reverse=True)
-    )
-
-    np.random.seed(0)
-    print(
-        sorted(UserBasedCF(k=2, n_user_block=10, n_cross_block=10, n_item_block=10,
-                           threshold=0.01, n_bands=100, signature_length=200, random_seed=0)
-               .fit_predict(train, test).collect(), key=lambda u: (u[2], u[0], u[1]), reverse=True)
-    )
+    """
+    User-based CF sub-classing from NeighborhoodBasedCF
+    """
+    def __init__(self, n_user_block=1, n_item_block=1,
+                 user_block_size=None, item_block_size=None, **kwargs):
+        super().__init__(n_bucket_block=n_user_block, n_item_block=n_item_block,
+                         bucket_block_size=user_block_size, item_block_size=item_block_size, **kwargs)

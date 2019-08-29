@@ -4,7 +4,7 @@ LSH for cosine distance.
 """
 from pyspark import SparkContext
 import numpy as np
-from datming.similar_items import cosine_similarity
+from datming.similarity import cosine_similarity
 
 
 class LSHCosine(object):
