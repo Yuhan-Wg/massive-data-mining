@@ -81,7 +81,7 @@ class BigCLAM(object):
                 index = nodes
             """
             if self._edges is None:
-                raise ValueError("Please add edges to the model and then run the algorithm.")
+                raise ValueError("Please add edges to the model and then _lsh_predict the algorithm.")
             membership_matrix = self.membership_matrix
             n_loop, likelihood_prev, improvement = 0, float("-inf"), 1
             while n_loop < self._n_iteration and improvement > self._likelihood_criteria:

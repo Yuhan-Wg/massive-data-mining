@@ -14,7 +14,7 @@ Eclat | Frequent Item-set | [Local](python/datming/freq_itemset/eclat.py)
 PCY | Frequent Item-set | [Local](python/datming/freq_itemset/pcy.py)
 SON | Frequent Item-set | [Distributed](python/datming/freq_itemset/son.py)
 Toivonen | Frequent Item-set | [Local](python/datming/freq_itemset/toivonen.py)
-LSH of Jaccard Similarity | Similar Items | [Distributed](python/datming/similar_items/lsh_jaccard.py)
+LSH of Jaccard Similarity | Similar Items | [Distributed](python/datming/similar_items/jaccard_similarity.py)
 LSH of Euclidean Similarity | Similar Items | [Distributed](python/datming/similar_items/lsh_euclidean.py)
 LSH of Cosine Similarity | Similar Items | [Distributed](python/datming/similar_items/lsh_cosine.py)
 Girvan-Newman Algorithm | Graph Community Searching | [Distributed](python/datming/graph/community/girvan_newman.py)
@@ -23,7 +23,7 @@ Big-CLAM | Graph Community Searching | [Distributed](python/datming/graph/commun
 PageRank | Link Analysis | [Distributed](python/datming/graph/link_analysis/page_rank.py)
 Trust-Rank | Link Analysis | [Distributed](python/datming/graph/link_analysis/trust_rank.py)
 K-Means | Clustering | [Distributed](python/datming/clustering/k_means.py)
-BFR | Clustering | [Distributed](python/datming/clustering/bfr.py)
+BFR | Clustering | [Local](python/datming/clustering/bfr.py)
 Neighborhood-based CF | Recommender System | [Distributed](python/datming/recommender/neighbohood_based_cf.py)
 
 ### Process

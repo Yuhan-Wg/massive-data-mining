@@ -10,12 +10,7 @@ Distance Measures:
 import numpy as np
 
 
-def jaccard_similarity(arr1, arr2):
-    return len(set(arr1) & set(arr2)) / len(set(arr1) | set(arr2))
 
-
-def jaccard_distance(arr1, arr2):
-    return 1 - jaccard_similarity(arr1, arr2)
 
 
 def euclidean_distance(arr1, arr2):

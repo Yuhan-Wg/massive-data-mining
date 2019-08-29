@@ -13,7 +13,7 @@ Two Neighborhood-Based CF modes: spark, local
         Faster but also more strict in data size limitation.
 """
 from pyspark import SparkContext, RDD
-from datming.similar_items import LSHJaccard
+from datming.similar_items import JaccardSimilarity
 
 from numbers import Number
 from collections import defaultdict
@@ -114,7 +114,7 @@ class NeighborhoodBasedCF(object):
         """
         train = train.map(lambda u: (u[0], u[1]))\
             .groupByKey().map(lambda u: (u[0], list(u[1]))).cache()
-        similarity_among_buckets = LSHJaccard(**lsh_params).run(train)
+        similarity_among_buckets = JaccardSimilarity(**lsh_params)._lsh_predict(train)
         return similarity_among_buckets
 
     def _init_parameters(self, train):
