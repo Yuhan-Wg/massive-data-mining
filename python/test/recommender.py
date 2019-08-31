@@ -20,14 +20,14 @@ class TestRecommenderSystem(unittest.TestCase):
         test_data = SparkContext.getOrCreate().parallelize(test_data).cache()
 
         result1 = (
-            UserBasedCF(k=float("inf"), n_user_block=4, n_cross_block=4, n_item_block=4, maximum_num_partitions=10,
-                        threshold=0.01, n_bands=100, signature_length=200, seed=0)
+            UserBasedCF(k=float("inf"), n_user_block=4, n_cross_block=4, n_item_block=4,
+                        maximum_num_partitions=10, threshold=0.01, n_bands=100, signature_length=200, seed=0)
             .fit_predict(train_data, test_data)
         )
 
         result2 = (
-            UserBasedCF(k=float("inf"), n_user_block=10, n_cross_block=10, n_item_block=10, maximum_num_partitions=10,
-                        threshold=0.01, n_bands=100, signature_length=200, seed=0)
+            UserBasedCF(k=float("inf"), n_user_block=10, n_cross_block=10, n_item_block=10,
+                        maximum_num_partitions=10, threshold=0.01, n_bands=100, signature_length=200, seed=0)
             .fit_predict(train_data, test_data)
         )
 

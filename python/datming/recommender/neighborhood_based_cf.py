@@ -1,16 +1,15 @@
 """
 Neighborhood-based Collaborative filtering. Include: Item-based CF and User-based CF
-Two Neighborhood-Based CF modes: spark, local
-    spark:
-        A straightforward implementation of Neighborhood-Based CF algorithm with Spark.
-        Good for the situation that the data are extremely large.
-        This implementation needs to shuffle about (n_bucket_block * n_bucket_block * n_item_block) keys and duplicate
-        similarity matrix and rating matrix  (number of duplicates grows with n_bucket_block and n_item_block). So
-        there is a trade-off between time and space while adjusting n_bucket_block and n_item_block.
-    local:
-        Local implementation in local machine.
-        Good for the situation that similarity matrix and rating history can be cached in the memory.
-        Faster but also more strict in data size limitation.
+A straightforward implementation of Neighborhood-Based CF algorithm with Spark.
+This implementation needs to shuffle about (n_bucket_block * n_bucket_block * n_item_block) keys and duplicate
+    similarity matrix and rating matrix  (number of duplicates grows with n_bucket_block and n_item_block). So
+    there is a trade-off between time and space while adjusting n_bucket_block and n_item_block.
+
+>> sc = SparkContext.getOrCreate()
+>> train = sc.parallelize([(1, 2, 5.), (1, 3, 3.), (2, 3, 4.)])
+>> test = sc.parallelize([(2, 2)])
+>> result = UserBasedCF().fit_predict(train, test).collect()
+
 """
 from pyspark import SparkContext, RDD
 from datming.similarity import JaccardSimilarity

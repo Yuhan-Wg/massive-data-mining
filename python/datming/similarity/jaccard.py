@@ -23,16 +23,15 @@ Locality-Sensitive Hashing(LSH)
 [(1, 2, 0.55), (1, 3, 0.65)]
 
 """
-from pyspark import SparkContext, RDD
+from pyspark import RDD
 import random
-import numpy as np
 from types import GeneratorType
 from typing import Iterator, Hashable
 from datming.utils import hash2vector, join_multiple_keys
 
 
 __all__ = [
-    "jaccard_similarity", "jaccard_distance", "JaccardSimilarity"
+    "JaccardSimilarity"
 ]
 
 

@@ -1,11 +1,7 @@
-from .distance_measure import *
-from .jaccard import JaccardSimilarity, jaccard_distance, jaccard_similarity
-from .lsh_euclidean import LSHEuclidean
-from .lsh_cosine import LSHCosine
+from .jaccard import JaccardSimilarity
+from .euclidean import EuclideanDistance
+from .cosine import CosineSimilarity
 
 __all__ = [
-    "euclidean_distance",
-    "cosine_similarity", "cosine_distance",
-    "JaccardSimilarity", "jaccard_distance", "jaccard_similarity"
-    "LSHEuclidean", "LSHCosine"
+    "CosineSimilarity", "JaccardSimilarity", "EuclideanDistance"
 ]

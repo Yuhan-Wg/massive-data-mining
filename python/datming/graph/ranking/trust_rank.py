@@ -4,7 +4,7 @@ Authority: how important the page is about topic?
 Hub: does it provide many pointers to the topic?
 """
 from pyspark import SparkContext
-from datming.graph.link_analysis.page_rank import PageRank
+from datming.graph.ranking.page_rank import PageRank
 from datming.graph.community import generate_test_case
 from collections import defaultdict
 
