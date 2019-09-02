@@ -49,7 +49,7 @@ class SON(object):
         sub_support = self._support//self._num_partitions
         apriori = APriori(support=sub_support)
         candidates = list()
-        for c in apriori.iter_count(iterable=iterable):
+        for c in apriori.predict(iterable=iterable):
             candidates.extend(c.keys())
         return candidates
 

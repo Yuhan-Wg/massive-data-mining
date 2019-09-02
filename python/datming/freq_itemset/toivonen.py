@@ -16,6 +16,7 @@ from datming.freq_itemset.random_sampling import RandomSampling
 from datming.freq_itemset.apriori import APriori
 import random
 
+
 class Toivonen(object):
     def __init__(self, support, sampling_rate, adjust_rate=1, random_seed=None):
         self._support = support

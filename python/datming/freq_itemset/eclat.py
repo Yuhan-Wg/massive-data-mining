@@ -1,3 +1,6 @@
+"""
+Eclat
+"""
 from collections import defaultdict
 
 

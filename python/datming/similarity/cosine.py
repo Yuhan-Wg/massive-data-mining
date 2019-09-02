@@ -70,7 +70,7 @@ class CosineSimilarityLSH(object):
     def __compute_candidates(data: RDD, hyperplanes: np.array,
                              n_bands: int, n_rows: int, num_partitions: int)-> RDD:
         """
-        Generate signatures, hash keys into buckets according to signature
+        Generate signatures, __hash keys into buckets according to signature
          and group keys in the same bucket.
         :return: RDD<Tuple[Hashable]>
             = RDD<Tuple[key]>

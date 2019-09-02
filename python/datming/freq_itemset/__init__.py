@@ -20,7 +20,7 @@ This module is to find frequent item-sets with given support value.
 """
 
 from .apriori import APriori
-from .pcy import PCY, MultiHashPCY
+from .pcy import MultiHashPCY
 from .random_sampling import RandomSampling
 from .toivonen import Toivonen
 from .son import SON
@@ -28,7 +28,7 @@ from .fpgrowth import FPGrowth
 from .eclat import Eclat
 
 __all__ = [
-    "APriori", "PCY", "MultiHashPCY", "RandomSampling",
+    "APriori", "MultiHashPCY", "RandomSampling",
     "Toivonen", "SON", "FPGrowth", "Eclat"
 ]
 

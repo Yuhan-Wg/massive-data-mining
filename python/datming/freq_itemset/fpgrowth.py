@@ -1,11 +1,11 @@
-"""
-FP-Growth
-"""
 from collections import defaultdict
 from pyspark import SparkContext
 
 
 class FPGrowth(object):
+    """
+    FP-Growth Algorithm.
+    """
     def __init__(self, support):
         self._support = support
         self._root = None

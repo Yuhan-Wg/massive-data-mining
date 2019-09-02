@@ -192,7 +192,7 @@ class SpectralClustering(object):
         @staticmethod
         def _hash(hashable):
             """
-            Use a hash function to divide nodes into blocks.
+            Use a __hash function to divide nodes into blocks.
             """
             return hash(hashable)
 
